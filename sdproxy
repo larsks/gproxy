@@ -13,10 +13,26 @@ from gevent import monkey; monkey.patch_all()
 
 last_data = time.time()
 
+class Timeout(Exception):
+    pass
+
 def parse_args():
     p = argparse.ArgumentParser()
+    p.add_argument('--wait-timeout', '-w',
+                   type=int,
+                   help=('Time to wait for remote to '
+                         'become active before exiting '
+                         'with an error.'))
+    p.add_argument('--connect-timeout', '-c',
+                   type=int,
+                   default=10,
+                   help=('Time to wait for a single '
+                         'connection to remote.'))
     p.add_argument('--idle-timeout', '-t',
-                   type=int)
+                   type=int,
+                   help=('If there is no activity after '
+                         'this many seconds the proxy '
+                         'will exit.'))
     p.add_argument('--debug', '-d',
                    action='store_const',
                    const=logging.DEBUG,
@@ -31,10 +47,31 @@ def parse_args():
     p.set_defaults(loglevel=logging.WARN)
     return p.parse_args()
 
-def channel(clisock, remsock, cliaddr):
-    '''Handles a single connection between a client and the remote server
-    for which we are acting as a proxy.'''
+def wait_for_active():
+    start_wait = time.time()
 
+    while True:
+        now = time.time()
+        wait_time = now - start_wait
+
+        try:
+            s = socket.create_connection(
+                (args.remotehost, args.remoteport),
+                timeout=args.connect_timeout)
+            logging.debug('remote is active after %d seconds', wait_time)
+            return s
+        except (socket.error, socket.timeout) as detail:
+            logging.debug('waiting %d seconds for remote to become active',
+                         wait_time)
+            if args.wait_timeout and wait_time > args.wait_timeout:
+                raise Timeout()
+
+            # Sleep 1 second as errors to avoid spinning on
+            # 'connection refused'
+            if isinstance(detail, socket.error):
+                time.sleep(1)
+
+def proxy_data(clisock, remsock, cliaddr):
     global last_data
 
     from_client = []
@@ -42,7 +79,6 @@ def channel(clisock, remsock, cliaddr):
 
     rfdlist = [clisock, remsock]
 
-    logging.debug('starting channel for client %s', cliaddr)
     while True:
         wfdlist = set()
 
@@ -78,11 +114,27 @@ def channel(clisock, remsock, cliaddr):
             last_data = time.time()
             from_remote.append(data)
 
-    logging.info('closing channel for client %s', cliaddr)
-    remsock.close()
-    clisock.close()
+def channel(clisock, cliaddr):
+    '''Handles a single connection between a client and the remote server
+    for which we are acting as a proxy.'''
+
+    remsock = None
+
+    try:
+        logging.debug('starting channel for client %s', cliaddr)
+        remsock = wait_for_active()
+        proxy_data(clisock, remsock, cliaddr)
+    except Timeout:
+        logging.debug('timed out waiting for remote to become active')
+    finally:
+        logging.info('closing channel for client %s', cliaddr)
+        clisock.close()
+        if remsock is not None:
+            remsock.close()
 
 def main():
+    global args
+
     args = parse_args()
     logging.basicConfig(
         level = args.loglevel)
@@ -98,8 +150,7 @@ def main():
         if listener in rfds:
             clisock, cliaddr = listener.accept()
             logging.info('new connection from %s', cliaddr)
-            remsock = socket.create_connection((args.remotehost, args.remoteport))
-            gevent.spawn(channel, clisock, remsock, cliaddr)
+            gevent.spawn(channel, clisock, cliaddr)
 
         now = time.time()
         idletime = now-last_data
