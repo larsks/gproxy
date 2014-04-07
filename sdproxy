@@ -155,6 +155,7 @@ def main():
         now = time.time()
         idletime = now-last_data
         if args.idle_timeout and (idletime > args.idle_timeout):
+            logging.info('idle time exceeded')
             break
 
 if __name__ == '__main__':
