@@ -1,0 +1,111 @@
+#!/usr/bin/python
+
+import os
+import sys
+import argparse
+import socket
+import time
+import logging
+
+import gevent
+from gevent import select
+from gevent import monkey; monkey.patch_all()
+
+last_data = time.time()
+
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument('--idle-timeout', '-t',
+                   type=int)
+    p.add_argument('--debug', '-d',
+                   action='store_const',
+                   const=logging.DEBUG,
+                   dest='loglevel')
+    p.add_argument('--verbose', '-v',
+                   action='store_const',
+                   const=logging.INFO,
+                   dest='loglevel')
+    p.add_argument('remotehost')
+    p.add_argument('remoteport',
+                   type=int)
+    p.set_defaults(loglevel=logging.WARN)
+    return p.parse_args()
+
+def channel(clisock, remsock, cliaddr):
+    '''Handles a single connection between a client and the remote server
+    for which we are acting as a proxy.'''
+
+    global last_data
+
+    from_client = []
+    from_remote = []
+
+    rfdlist = [clisock, remsock]
+
+    logging.debug('starting channel for client %s', cliaddr)
+    while True:
+        wfdlist = set()
+
+        if from_client:
+            wfdlist.add(remsock)
+        if from_remote:
+            wfdlist.add(clisock)
+
+        # We have to use select because (a) nothing else seems to be cross
+        # platform, and (b) gevent only provides select().
+        rfds, wfds, xfds = select.select(rfdlist, list(wfdlist), [])
+
+        if clisock in wfds:
+            clisock.send(from_remote.pop(0))
+        if remsock in wfds:
+            remsock.send(from_client.pop(0))
+        
+        if clisock in rfds:
+            data = clisock.recv(8192)
+            logging.debug('read %d bytes from client', len(data))
+            if not data:
+                break
+
+            last_data = time.time()
+            from_client.append(data)
+        
+        if remsock in rfds:
+            data = remsock.recv(8192)
+            logging.debug('read %d bytes from remote', len(data))
+            if not data:
+                break
+
+            last_data = time.time()
+            from_remote.append(data)
+
+    logging.info('closing channel for client %s', cliaddr)
+    remsock.close()
+    clisock.close()
+
+def main():
+    args = parse_args()
+    logging.basicConfig(
+        level = args.loglevel)
+
+    listenfds = int(os.environ.get('LISTEN_FDS', 0))
+    assert(listenfds == 1)
+
+    listener = socket.fromfd(3, socket.AF_INET, socket.SOCK_STREAM)
+
+    logging.info('starting main loop')
+    while True:
+        rfds, wfds, xfds = select.select([listener], [], [], 10)
+        if listener in rfds:
+            clisock, cliaddr = listener.accept()
+            logging.info('new connection from %s', cliaddr)
+            remsock = socket.create_connection((args.remotehost, args.remoteport))
+            gevent.spawn(channel, clisock, remsock, cliaddr)
+
+        now = time.time()
+        idletime = now-last_data
+        if args.idle_timeout and (idletime > args.idle_timeout):
+            break
+
+if __name__ == '__main__':
+    main()
+

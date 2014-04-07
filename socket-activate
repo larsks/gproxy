@@ -1,0 +1,48 @@
+#!/usr/bin/python
+
+'''This is a simple tool for starting systemd socket-activation compatible
+programs in the absence of systemd.  It is much like the systemd-activate
+command but somewhat more portable.'''
+
+import os
+import sys
+import argparse
+import socket
+import select
+
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument('--listen', '-l', action='append', default=[])
+    p.add_argument('command', nargs='+')
+    return p.parse_args()
+
+def launch(command, listeners):
+    os.environ['LISTEN_FDS'] = '%d' % len(listeners)
+    os.execvp(command[0], command)
+
+def main():
+    args = parse_args()
+
+    listeners = []
+    for p in args.listen:
+        if ':' in p:
+            addr, port = p.split(':')
+        else:
+            addr, port = ('127.0.0.1', p)
+
+        listener = socket.socket()
+        listener.bind((addr, int(port)))
+        listener.listen(10)
+
+        listeners.append(listener)
+
+    while True:
+        rlist, wlist, xlist = select.select(listeners,
+                                            listeners,
+                                            listeners)
+
+        launch(args.command, listeners)
+
+if __name__ == '__main__':
+    main()
+
