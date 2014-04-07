@@ -31,6 +31,7 @@ def main():
             addr, port = ('127.0.0.1', p)
 
         listener = socket.socket()
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         listener.bind((addr, int(port)))
         listener.listen(10)
 
