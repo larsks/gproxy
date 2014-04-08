@@ -66,7 +66,7 @@ def wait_for_active():
             if args.wait_timeout and wait_time > args.wait_timeout:
                 raise Timeout()
 
-            # Sleep 1 second as errors to avoid spinning on
+            # Sleep 1 second on errors to avoid spinning on
             # 'connection refused'
             if isinstance(detail, socket.error):
                 time.sleep(1)
@@ -89,7 +89,9 @@ def proxy_data(clisock, remsock, cliaddr):
 
         # We have to use select because (a) nothing else seems to be cross
         # platform, and (b) gevent only provides select().
-        rfds, wfds, xfds = select.select(rfdlist, list(wfdlist), [])
+        rfds, wfds, xfds = select.select(rfdlist,
+                                         list(wfdlist),
+                                         [])
 
         if clisock in wfds:
             clisock.send(from_remote.pop(0))
@@ -152,11 +154,13 @@ def main():
             logging.info('new connection from %s', cliaddr)
             gevent.spawn(channel, clisock, cliaddr)
 
-        now = time.time()
-        idletime = now-last_data
-        if args.idle_timeout and (idletime > args.idle_timeout):
-            logging.info('idle time exceeded')
-            break
+        if not rfds:
+            now = time.time()
+            idletime = now-last_data
+            logging.debug('idle check (%d)', idletime)
+            if args.idle_timeout and (idletime > args.idle_timeout):
+                logging.info('idle time exceeded')
+                break
 
 if __name__ == '__main__':
     main()
