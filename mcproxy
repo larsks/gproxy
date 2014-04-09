@@ -61,7 +61,7 @@ def connect_to_server():
             s = socket.create_connection(
                 (args.remotehost, args.remoteport),
                 timeout=args.connect_timeout)
-            logging.debug('remote is active after %d seconds', wait_time)
+            logging.info('remote is active after %d seconds', wait_time)
             return s
         except (socket.error, socket.timeout) as detail:
             logging.debug('waiting %d seconds for remote to become active',
