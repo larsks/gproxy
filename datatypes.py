@@ -1,4 +1,4 @@
-from six import add_metaclass
+from six import with_metaclass
 import struct
 import json
 
@@ -112,8 +112,7 @@ class PacketMeta (type):
 
         cls._fields = sorted(fields, key=lambda field: field[1]._id)
 
-@add_metaclass(PacketMeta)
-class PacketBase (dict):
+class PacketBase (with_metaclass(PacketMeta)):
     @classmethod
     def decode(cls, data):
         value = {}
