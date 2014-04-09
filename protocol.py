@@ -1,7 +1,6 @@
 import json
 import struct
 from cStringIO import StringIO
-import varint
 import logging
 
 from datatypes import *
