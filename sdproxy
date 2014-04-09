@@ -11,6 +11,7 @@ import gevent
 from gevent import select
 from gevent import monkey; monkey.patch_all()
 
+buffer_size = 8192
 last_data = time.time()
 
 class Timeout(Exception):
@@ -74,47 +75,58 @@ def wait_for_active():
 def proxy_data(clisock, remsock, cliaddr):
     global last_data
 
-    from_client = []
-    from_remote = []
+    from_client = ''
+    from_remote = ''
 
-    rfdlist = [clisock, remsock]
+    rfds = set([clisock, remsock])
 
     while True:
-        wfdlist = set()
+        wfds = set()
 
         if from_client:
-            wfdlist.add(remsock)
+            wfds.add(remsock)
         if from_remote:
-            wfdlist.add(clisock)
+            wfds.add(clisock)
 
         # We have to use select because (a) nothing else seems to be cross
         # platform, and (b) gevent only provides select().
-        rfds, wfds, xfds = select.select(rfdlist,
-                                         list(wfdlist),
-                                         [])
+        ready_read, ready_write, _ = select.select(
+            list(rfds),
+            list(wfds),
+            [])
 
-        if clisock in wfds:
-            clisock.send(from_remote.pop(0))
-        if remsock in wfds:
-            remsock.send(from_client.pop(0))
+        if clisock in ready_write:
+            nb = clisock.send(from_remote)
+            logging.debug('wrote %d bytes to client', nb)
+            from_remote = from_remote[nb:]
+            if from_remote:
+                logging.debug('%d bytes remaining from remote',
+                              len(from_remote))
+        if remsock in ready_write:
+            nb = remsock.send(from_client)
+            logging.debug('wrote %d bytes to remote', nb)
+            from_client = from_client[nb:]
+            if from_client:
+                logging.debug('%d bytes remaining from client',
+                              len(from_client))
         
-        if clisock in rfds:
-            data = clisock.recv(8192)
+        if clisock in ready_read:
+            data = clisock.recv(buffer_size)
             logging.debug('read %d bytes from client', len(data))
             if not data:
                 break
 
             last_data = time.time()
-            from_client.append(data)
+            from_client += data
         
-        if remsock in rfds:
-            data = remsock.recv(8192)
+        if remsock in ready_read:
+            data = remsock.recv(buffer_size)
             logging.debug('read %d bytes from remote', len(data))
             if not data:
                 break
 
             last_data = time.time()
-            from_remote.append(data)
+            from_remote += data
 
 def channel(clisock, cliaddr):
     '''Handles a single connection between a client and the remote server
