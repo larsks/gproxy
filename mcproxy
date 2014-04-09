@@ -1,0 +1,224 @@
+#!/usr/bin/python
+
+import os
+import sys
+import argparse
+import socket
+import time
+import logging
+
+import gevent
+from gevent import select
+from gevent import monkey; monkey.patch_all()
+
+import varint
+from protocol import Engine
+
+buffer_size = 8192
+last_data = time.time()
+
+class Timeout(Exception):
+    pass
+
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument('--wait-timeout', '-w',
+                   type=int,
+                   help=('Time to wait for remote to '
+                         'become active before exiting '
+                         'with an error.'))
+    p.add_argument('--connect-timeout', '-c',
+                   type=int,
+                   default=10,
+                   help=('Time to wait for a single '
+                         'connection to remote.'))
+    p.add_argument('--idle-timeout', '-t',
+                   type=int,
+                   help=('If there is no activity after '
+                         'this many seconds the proxy '
+                         'will exit.'))
+    p.add_argument('--debug', '-d',
+                   action='store_const',
+                   const=logging.DEBUG,
+                   dest='loglevel')
+    p.add_argument('--verbose', '-v',
+                   action='store_const',
+                   const=logging.INFO,
+                   dest='loglevel')
+    p.add_argument('remotehost')
+    p.add_argument('remoteport',
+                   type=int)
+    p.set_defaults(loglevel=logging.WARN)
+    return p.parse_args()
+
+def connect_to_server():
+    start_wait = time.time()
+
+    while True:
+        now = time.time()
+        wait_time = now - start_wait
+
+        try:
+            s = socket.create_connection(
+                (args.remotehost, args.remoteport),
+                timeout=args.connect_timeout)
+            logging.debug('remote is active after %d seconds', wait_time)
+            return s
+        except (socket.error, socket.timeout) as detail:
+            logging.debug('waiting %d seconds for remote to become active',
+                         wait_time)
+            if args.wait_timeout and wait_time > args.wait_timeout:
+                raise Timeout()
+
+            if isinstance(detail, socket.error):
+                time.sleep(1)
+
+def proxy_data(clisock, cliaddr, connector):
+    global last_data
+
+    from_client = ''
+    from_remote = ''
+
+    rfds = set([clisock])
+    wfds = set()
+
+    pe = Engine()
+
+    logging.info('starting handshake for %s', cliaddr)
+
+    # Handle handshake
+    while True:
+        if from_remote:
+            wfds.add(clisock)
+
+        ready_read, ready_write, _ = select.select(
+            list(rfds),
+            list(wfds),
+            []
+            )
+
+        if clisock in ready_write:
+            nb = clisock.send(from_remote)
+            last_data = time.time()
+            logging.debug('wrote %d bytes to client: %s' % (
+                nb, repr(from_remote[:nb])))
+            from_remote = from_remote[nb:]
+            if not from_remote:
+                wfds.remove(clisock)
+
+        if clisock in ready_read:
+            from_client = clisock.recv(buffer_size)
+            logging.debug('read %d bytes from client: %s' % (
+                len(from_client), repr(from_client)))
+            if not from_client:
+                # client closed connection
+                return
+
+            for response in pe.send(from_client):
+                from_remote += response
+
+        if pe.complete and not from_remote:
+            rfds.remove(clisock)
+            from_client = pe.buffer
+            break
+
+    rfds = set([clisock])
+    wfds = set()
+
+    logging.info('starting main proxy loop for %s', cliaddr)
+    logging.debug('initial client buffer is: %s', repr(from_client))
+
+    while True:
+        remsock = connector.value
+        if remsock:
+            rfds.add(remsock)
+
+        if from_remote:
+            wfds.add(clisock)
+        if from_client and remsock:
+            wfds.add(remsock)
+
+        ready_read, ready_write, _ = select.select(
+            list(rfds),
+            list(wfds),
+            [],
+            0 if (from_remote or from_client) else None,
+            )
+
+        if clisock in ready_write:
+            nb = clisock.send(from_remote)
+            logging.debug('wrote %d bytes to client', nb)
+            from_remote = from_remote[nb:]
+            last_data = time.time()
+
+        if remsock in ready_write:
+            nb = remsock.send(from_client)
+            logging.debug('wrote %d bytes to remote', nb)
+            from_client = from_client[nb:]
+            last_data = time.time()
+
+        if clisock in ready_read:
+            data = clisock.recv(buffer_size)
+            logging.debug('read %d bytes from client', len(data))
+            if not data:
+                return
+            from_client += data
+            last_data = time.time()
+
+        if remsock in ready_read:
+            data = remsock.recv(buffer_size)
+            logging.debug('read %d bytes from remote', len(data))
+            if not data:
+                return
+            from_remote += data
+            last_data = time.time()
+
+def channel(clisock, cliaddr):
+    '''Handles a single connection between a client and the remote server
+    for which we are acting as a proxy.'''
+
+    try:
+        logging.debug('starting channel for client %s', cliaddr)
+
+        # Start connecting to remote in another greenlet
+        connector = gevent.spawn(connect_to_server)
+        proxy_data(clisock, cliaddr, connector)
+    except Timeout:
+        logging.debug('timed out waiting for remote to become active')
+    finally:
+        logging.info('closing channel for client %s', cliaddr)
+        clisock.close()
+        if connector.value:
+            connector.value.close()
+
+def main():
+    global args
+
+    args = parse_args()
+    logging.basicConfig(
+        level = args.loglevel)
+
+    listenfds = int(os.environ.get('LISTEN_FDS', 0))
+    assert(listenfds == 1)
+
+    listener = socket.fromfd(3, socket.AF_INET, socket.SOCK_STREAM)
+
+    logging.info('starting main loop')
+    while True:
+        rfds, wfds, xfds = select.select([listener], [], [], 10)
+        if listener in rfds:
+            clisock, cliaddr = listener.accept()
+            logging.info('new connection from %s', cliaddr)
+            gevent.spawn(channel, clisock, cliaddr)
+
+        if not rfds:
+            now = time.time()
+            idletime = now-last_data
+            logging.debug('idle check (%d)', idletime)
+            if args.idle_timeout and (idletime > args.idle_timeout):
+                logging.info('idle time exceeded')
+                break
+
+if __name__ == '__main__':
+    main()
+

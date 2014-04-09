@@ -85,19 +85,19 @@ class JSONString(Atom):
 
     def encode(self, value):
         data = json.dumps(value)
-        return self.varint.encode(len(data)) + data
+        return data
 
     def decode(self, data):
-        strlen, data = self.varint.decode(data)
-        value, data = data[:strlen], data[strlen:]
-        return json.loads(value)
+        return json.loads(data), ''
 
 class Field (object):
     fieldcount = 0
 
-    def __init__(self, wrapped):
+    def __init__(self, wrapped, encode=True, decode=True):
         self._wrapped = wrapped
         self._id = Field.fieldcount
+        self._encode = encode
+        self._decode = decode
         Field.fieldcount += 1
 
     def __getattr__(self, k):
@@ -118,7 +118,8 @@ class PacketBase (dict):
     def decode(cls, data):
         value = {}
         for fieldname, field in cls._fields:
-            value[fieldname], data = field.decode(data)
+            if field._decode:
+                value[fieldname], data = field.decode(data)
 
         return value, data
 
@@ -126,15 +127,22 @@ class PacketBase (dict):
     def encode(cls, value):
         data = ''
         for fieldname, field in cls._fields:
-            data += field.encode(value[fieldname])
+            if field._encode:
+                data += field.encode(value[fieldname])
 
         return data
 
 class Packet (PacketBase):
 
+    length = Field(Varint(), encode=False)
     id = Field(Varint())
     payload = Field(String())
 
+    def encode(self, value):
+        data = super(Packet, self).encode(value)
+        length = Varint().encode(len(data))
+        return length+data
+        
 class Handshake (PacketBase):
 
     protocol_version = Field(Varint())
@@ -158,6 +166,18 @@ if __name__ == '__main__':
                   'next_state': 1}
     data = Handshake.encode(orig_value)
     decoded_value, leftover = Handshake.decode(data)
+
+    assert(all(orig_value[k] == decoded_value[k]
+               for k in orig_value.keys()))
+
+    orig_value = {'status': {'players':
+                                {'max': 20, 'online': 0},
+                                'version': {'protocol': 4, 'name': 'CraftBukkit 1.7.5'},
+                                'description': 'Email minecraft@vankelsted.org for access.'},
+                     }
+
+    encoded_value = Status().encode(orig_value)
+    decoded_value, leftover = Status().decode(encoded_value)
 
     assert(all(orig_value[k] == decoded_value[k]
                for k in orig_value.keys()))

@@ -66,24 +66,25 @@ class Engine (object):
                     pkt, data = Handshake.decode(data)
                     print 'HANDSHAKE:', pkt
                     if pkt['next_state'] != 1:
-                        raise ValueError('unexpected next_state %(next_state)d from client'
-                                         % pkt)
+                        self.buffer = bytes
+                        self.complete = True
+                        break
                     self.state = 1
             elif self.state == 1:
                 if pktid == Engine.STATUS_REQUEST:
                     # no payload
                     response.append(
-                        Packet.encode({
+                        Packet().encode({
                             'id': Engine.STATUS_RESPONSE,
-                            'payload': Status.encode(server_status)}))
+                            'payload': Status().encode(server_status)}))
                     self.state = 2
             elif self.state == 2:
                 if pktid == Engine.PING:
                     pkt, data = Ping.decode(data)
                     response.append(
-                        Packet.encode({
+                        Packet().encode({
                             'id': Engine.PING,
-                            'payload': Ping.encode(pkt)}))
+                            'payload': Ping().encode(pkt)}))
 
                     self.completed = True
 
