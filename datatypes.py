@@ -137,8 +137,9 @@ class Packet (PacketBase):
     id = Field(Varint())
     payload = Field(String())
 
-    def encode(self, value):
-        data = super(Packet, self).encode(value)
+    @classmethod
+    def encode(cls, value):
+        data = super(Packet, cls).encode(value)
         length = Varint().encode(len(data))
         return length+data
         

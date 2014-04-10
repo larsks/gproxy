@@ -73,9 +73,9 @@ class Engine (object):
                 if pktid == Engine.STATUS_REQUEST:
                     # no payload
                     response.append(
-                        Packet().encode({
+                        Packet.encode({
                             'id': Engine.STATUS_RESPONSE,
-                            'payload': Status().encode(server_status)}))
+                            'payload': Status.encode(server_status)}))
                     self.state = 2
             elif self.state == 2:
                 if pktid == Engine.PING:
