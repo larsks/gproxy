@@ -16,6 +16,11 @@ wrote it mostly as an example, and also because
 [gevent]: http://gevent.org/
 [systemd]: http://www.freedesktop.org/wiki/Software/systemd/
 
+`mcproxy` is a minecraft-specific descendant of `sdproxy`.  It
+implements enough of the minecraft protocol to handle the initial
+handshake and status messages...which is hopefully long enough for
+your on-demand minecraft server to finish booting.
+
 Example
 =======
 
