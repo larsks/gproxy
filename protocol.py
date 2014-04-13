@@ -9,16 +9,10 @@ from exc import *
 LOG = logging.getLogger(__name__)
 
 default_status_response = {'players': {'max': 20, 'online': 0},
-                           'version': {'protocol': 4, 'name': 'CraftBukkit 1.7.5'},
+                           'version': {'protocol': 4,
+                                       'name': 'Minecraft Server'},
                            'description': 'Minecraft proxy'},
                 
-
-def coroutine(func):
-    def start(*args, **kwargs):
-        g = func(*args, **kwargs)
-        g.next()
-        return g
-    return start
 
 class Engine (object):
     '''This is a super-minimal implementation of the handshake portion of
@@ -108,6 +102,12 @@ class Engine (object):
 
         return response
 
+def hexdump(s):
+    dump = []
+    for c in s:
+        dump.append('%02X' % ord(c))
+    return ' '.join(dump)
+
 if __name__ == '__main__':
     logging.basicConfig(
         level=logging.DEBUG)
@@ -152,11 +152,11 @@ if __name__ == '__main__':
     pe = Engine()
     while True:
         from_client = bytes[:8]
-        print '<--', repr(from_client)
+        print '<--', repr(from_client), hexdump(from_client)
         bytes = bytes[8:]
         res = pe.send(from_client)
         for data in res:
-            print '-->', repr(data)
+            print '-->', repr(data), hexdump(data)
 
         if not bytes:
             break
