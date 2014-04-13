@@ -6,6 +6,7 @@ import argparse
 import socket
 import time
 import logging
+import yaml
 
 import gevent
 from gevent import select
@@ -44,6 +45,7 @@ def parse_args():
                    action='store_const',
                    const=logging.INFO,
                    dest='loglevel')
+    p.add_argument('--config', '-f')
     p.add_argument('remotehost')
     p.add_argument('remoteport',
                    type=int)
@@ -81,7 +83,7 @@ def proxy_data(clisock, cliaddr, connector):
     rfds = set([clisock])
     wfds = set()
 
-    pe = Engine()
+    pe = Engine(cfg.get('server_info'))
 
     logging.info('starting handshake for %s', cliaddr)
 
@@ -192,10 +194,15 @@ def channel(clisock, cliaddr):
 
 def main():
     global args
+    global cfg
 
     args = parse_args()
     logging.basicConfig(
         level = args.loglevel)
+
+    if args.config:
+        with open(args.config) as fd:
+            cfg = yaml.load(fd).get('minecraft', {})
 
     listenfds = int(os.environ.get('LISTEN_FDS', 0))
     assert(listenfds == 1)

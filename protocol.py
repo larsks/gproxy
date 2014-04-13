@@ -48,11 +48,15 @@ class Engine (object):
     PING            = 0x01
     STATUS_RESPONSE = 0
 
-    def __init__(self, status_response=default_status_response):
+    def __init__(self, status_response=None):
         self.state = 0
         self.buffer = ''
         self.complete = False
-        self.status_response = status_response
+
+        self.status_response = (
+            status_response
+            if status_response is not None
+            else default_status_response)
 
     def send(self, bytes):
         self.buffer += bytes
