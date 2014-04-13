@@ -170,7 +170,7 @@ class Packet (PacketBase):
 
     length = Field(Varint(), encode=False)
     id = Field(Varint())
-    payload = Field(lambda ctx: Bytes(ctx.get('length', None)))
+    payload = Field(lambda ctx: Bytes(ctx.get('payload_length', None)))
 
     @classmethod
     def encode(cls, value):
@@ -180,7 +180,7 @@ class Packet (PacketBase):
 
     @classmethod
     def pre_decode_payload(cls, ctx):
-        ctx['length'] -= len(
+        ctx['payload_length'] = ctx['length'] - len(
             cls.id.atom.encode(ctx['id']))
 
 class Handshake (PacketBase):
