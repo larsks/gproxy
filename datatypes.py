@@ -13,8 +13,10 @@ class Atom(object):
 
     def encode(self, value):
         return value
-
+    
 class Struct(Atom):
+    '''A data type that uses struct.pack/struct.unpack.'''
+
     def __init__(self, format):
         self.format = format
         self.size = struct.calcsize(format)
@@ -33,6 +35,10 @@ class Struct(Atom):
         return val, data[self.size:]
 
 class Varint(Atom):
+    '''Varint data type as used in Google protocol buffers. 
+    See https://developers.google.com/protocol-buffers/docs/encoding#varints
+    for details.
+    '''
     def encode(self, value):
         data = ''
 
@@ -73,6 +79,8 @@ class Varint(Atom):
         return value, data[i+1:]
 
 class String(Atom):
+    '''A string prefixed by its length as a Varint.'''
+
     def __init__(self):
         super(String, self).__init__()
         self.varint = Varint()
@@ -88,6 +96,8 @@ class String(Atom):
         return value, data
 
 class JSONString(String):
+    '''A JSON string, prefixed by its length as a Varint.'''
+
     def __init__(self):
         super(JSONString, self).__init__()
         self.varint = Varint()
@@ -101,6 +111,10 @@ class JSONString(String):
         return json.loads(value), data
 
 class Bytes (Atom):
+    '''A sequence of bytes, length determined by the `length` paramter to
+    `__init__`.
+    '''
+
     def __init__(self, length):
         super(Bytes, self).__init__()
         self.length = length
@@ -168,6 +182,10 @@ class PacketBase (with_metaclass(PacketMeta)):
         return data
 
 class Packet (PacketBase):
+    '''A Minecraft protocol packet. See
+    http://wiki.vg/Protocol#Packets for
+    details.
+    '''
 
     length = Field(Varint(), encode=False)
     id = Field(Varint())
@@ -185,17 +203,27 @@ class Packet (PacketBase):
             cls.id.atom.encode(ctx['id']))
 
 class Handshake (PacketBase):
+    '''Payload for a Handshake packet.  See
+    http://wiki.vg/Protocol#Handshake for
+    details.
+    '''
 
     protocol_version = Field(Varint())
-    server_address = Field(String())
-    server_port = Field(Struct('>H'))
-    next_state = Field(Varint())
+    server_address   = Field(String())
+    server_port      = Field(Struct('>H'))
+    next_state       = Field(Varint())
 
 class Status (PacketBase):
+    '''Payload for a server status response.  See
+    http://wiki.vg/Protocol#Response for details.
+    '''
 
     status = Field(JSONString())
 
 class Ping (PacketBase):
+    '''Payload for a ping packet.  See
+    http://wiki.vg/Protocol#Ping for details.
+    '''
 
     time = Field(Struct('>Q'))
 

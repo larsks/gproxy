@@ -117,6 +117,7 @@ if __name__ == '__main__':
     logging.basicConfig(
         level=logging.DEBUG)
 
+    # This is data extracted from a client/server packet dump.
     data=[
         '18 00 04 12 62 6f 75 6e 63 65 72 2e 6f 64 64 62 '
         '69 74 2e 63 6f 6d 63 dd 01',
@@ -139,12 +140,17 @@ if __name__ == '__main__':
         '09 01 00 00 01 45 3d 2f 98 96',
     ]
 
+    # This is just the client data for feed to an
+    # Engine object.
     clientdata=[
+        # Handshake
         '18 00 04 12 62 6f 75 6e 63 65 72 2e 6f 64 64 62 '
         '69 74 2e 63 6f 6d 63 dd 01',
 
+        # Status request
         '01 00',
 
+        # Ping
         '09 01 00 00 01 45 3d 2f 98 96',
     ]
 
@@ -155,6 +161,10 @@ if __name__ == '__main__':
         bytes += chunk
 
     pe = Engine()
+
+    # In the following loop we feed data to the Engine in chunks to
+    # simulate receiving multiple packets from a client.
+
     while True:
         from_client = bytes[:8]
         print '<--', repr(from_client), hexdump(from_client)
