@@ -6,16 +6,22 @@ sdproxy
 
 A simple socket-activated proxy.
 
+See README-sdproxy.md for details.
+
 mcproxy
 -------
 
 A minecraft proxy that handles handshake requests internally.  Used
 as part of an on-demand minecraft server setup.
 
+See README-mcproxy.md for details.
+
 socket-activate
 ---------------
 
 Used for testing socket-activated programs.
+
+See README-socket-activate.md for details.
 
 License
 =======
