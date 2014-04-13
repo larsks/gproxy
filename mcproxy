@@ -16,6 +16,7 @@ from protocol import Engine
 
 buffer_size = 8192
 last_data = time.time()
+cfg = {}
 
 class Timeout(Exception):
     pass
