@@ -1,6 +1,11 @@
 from six import with_metaclass
 import struct
 import json
+import logging
+
+from exc import *
+
+LOG = logging.getLogger(__name__)
 
 class Atom(object):
     def decode(self, data):
@@ -62,6 +67,8 @@ class Varint(Atom):
             else:
                 # The MSB was not set; this was the last byte in the value.
                 break
+        else:
+            raise NeedMoreData()
 
         return value, data[i+1:]
 
@@ -75,6 +82,8 @@ class String(Atom):
 
     def decode(self, data):
         strlen, data = self.varint.decode(data)
+        if len(data) < strlen:
+            raise NeedMoreData()
         value, data = data[:strlen], data[strlen:]
         return value, data
 
@@ -90,18 +99,33 @@ class JSONString(Atom):
     def decode(self, data):
         return json.loads(data), ''
 
+class Bytes (Atom):
+    def __init__(self, length):
+        super(Bytes, self).__init__()
+        self.length = length
+
+    def encode(self, value):
+        return (value[:self.length]
+                if self.length is not None
+                else value)
+
+    def decode(self, data):
+        if len(data) < self.length:
+            raise NeedMoreData()
+        return data[:self.length], data[self.length:]
+
 class Field (object):
     fieldcount = 0
 
-    def __init__(self, wrapped, encode=True, decode=True):
-        self._wrapped = wrapped
+    def __init__(self, atom, encode=True, decode=True):
+        self.atom = atom
         self._id = Field.fieldcount
         self._encode = encode
         self._decode = decode
         Field.fieldcount += 1
 
     def __getattr__(self, k):
-        return getattr(self._wrapped, k)
+        return getattr(self.atom, k)
 
 class PacketMeta (type):
     def __init__(cls, name, bases, attrs):
@@ -115,19 +139,30 @@ class PacketMeta (type):
 class PacketBase (with_metaclass(PacketMeta)):
     @classmethod
     def decode(cls, data):
-        value = {}
+        ctx = {}
         for fieldname, field in cls._fields:
             if field._decode:
-                value[fieldname], data = field.decode(data)
+                if hasattr(cls, 'pre_decode_%s' % fieldname):
+                    getattr(cls, 'pre_decode_%s' % fieldname)(ctx)
 
-        return value, data
+                atom = (field.atom(ctx)
+                        if callable(field.atom)
+                        else field.atom)
+
+                ctx[fieldname], data = atom.decode(data)
+
+        return ctx, data
 
     @classmethod
-    def encode(cls, value):
+    def encode(cls, ctx):
         data = ''
         for fieldname, field in cls._fields:
             if field._encode:
-                data += field.encode(value[fieldname])
+                atom = (field.atom(ctx)
+                        if callable(field.atom)
+                        else field.atom)
+
+                data += atom.encode(ctx[fieldname])
 
         return data
 
@@ -135,14 +170,19 @@ class Packet (PacketBase):
 
     length = Field(Varint(), encode=False)
     id = Field(Varint())
-    payload = Field(String())
+    payload = Field(lambda ctx: Bytes(ctx.get('length', None)))
 
     @classmethod
     def encode(cls, value):
         data = super(Packet, cls).encode(value)
         length = Varint().encode(len(data))
         return length+data
-        
+
+    @classmethod
+    def pre_decode_payload(cls, ctx):
+        ctx['length'] -= len(
+            cls.id.atom.encode(ctx['id']))
+
 class Handshake (PacketBase):
 
     protocol_version = Field(Varint())

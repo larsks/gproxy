@@ -4,14 +4,14 @@ from cStringIO import StringIO
 import logging
 
 from datatypes import *
+from exc import *
 
-LOG = logging.getLogger('protocol')
+LOG = logging.getLogger(__name__)
 
-server_status = {'status': {'players':
-                            {'max': 20, 'online': 0},
-                            'version': {'protocol': 4, 'name': 'CraftBukkit 1.7.5'},
-                            'description': 'Email minecraft@vankelsted.org for access.'},
-                 }
+default_status_response = {'players': {'max': 20, 'online': 0},
+                           'version': {'protocol': 4, 'name': 'CraftBukkit 1.7.5'},
+                           'description': 'Minecraft proxy'},
+                
 
 def coroutine(func):
     def start(*args, **kwargs):
@@ -21,6 +21,26 @@ def coroutine(func):
     return start
 
 class Engine (object):
+    '''This is a super-minimal implementation of the handshake portion of
+    the Minecraft protocol.  Create an Engine object:
+
+        e = Engine()
+
+    Feed data to the engine using `e.send(data)` and receive back a list of
+    responses to send to the client.  Check for `e.complete` to see if the
+    handshake process is complete:
+
+        responses = e.send(data)
+        for response in responses:
+            client.send(response)
+        if e.complete:
+            break
+
+    After the engine exits, `e.buffer` will contain any data from the
+    client that has not been processed.
+    '''
+
+    # Maps states to expected packet ids.
     expected = {
         0: [0],
         1: [0],
@@ -28,70 +48,70 @@ class Engine (object):
         3: [1],
     }
 
+    # Packet IDs.  Geez, Mojang, how about some variety?
     HANDSHAKE       = 0
     STATUS_REQUEST  = 0
     PING            = 0x01
     STATUS_RESPONSE = 0
 
-    def __init__(self):
+    def __init__(self, status_response=default_status_response):
         self.state = 0
         self.buffer = ''
         self.complete = False
-        self.waiting = False
+        self.status_response = status_response
 
     def send(self, bytes):
         self.buffer += bytes
         response = []
 
         while self.buffer:
-            pktlen, data = Varint().decode(self.buffer)
-
-            if len(data) < pktlen:
-                self.waiting = True
+            try:
+                pkt, data = Packet.decode(self.buffer)
+            except NeedMoreData:
                 break
 
-            self.buffer = self.buffer[pktlen+1:]
+            self.buffer = data
 
-            print 'TOP S:', self.state
-
-            self.waiting = False
-            pktid, data = Varint().decode(data)
-            if self.state in self.expected and not pktid in self.expected[self.state]: 
+            if self.state in self.expected and not pkt['id'] in self.expected[self.state]: 
                 raise ValueError('unexpected packet id %d in state %d' % (
-                    pktid, self.state))
+                    pkt['id'], self.state))
 
             if self.state == 0:
-                if pktid == Engine.HANDSHAKE:
-                    pkt, data = Handshake.decode(data)
-                    print 'HANDSHAKE:', pkt
+                if pkt['id'] == Engine.HANDSHAKE:
+                    pkt, remainder = Handshake.decode(pkt['payload'])
+                    LOG.debug('handshake: %s', ', '.join('%s=%s' % (k,v) for k,v in pkt.items()))
                     if pkt['next_state'] != 1:
                         self.buffer = bytes
                         self.complete = True
                         break
                     self.state = 1
             elif self.state == 1:
-                if pktid == Engine.STATUS_REQUEST:
+                if pkt['id'] == Engine.STATUS_REQUEST:
+                    LOG.debug('status request')
                     # no payload
                     response.append(
                         Packet.encode({
                             'id': Engine.STATUS_RESPONSE,
-                            'payload': Status.encode(server_status)}))
+                            'payload': Status.encode({'status':
+                                                      self.status_response})}))
                     self.state = 2
             elif self.state == 2:
-                if pktid == Engine.PING:
-                    pkt, data = Ping.decode(data)
+                if pkt['id'] == Engine.PING:
+                    ping, remainder = Ping.decode(pkt['payload'])
+                    LOG.debug('ping, time=%s' % ping['time'])
                     response.append(
                         Packet().encode({
                             'id': Engine.PING,
-                            'payload': Ping().encode(pkt)}))
+                            'payload': Ping().encode(ping)}))
 
                     self.completed = True
-
-            print 'BOTTOM S:', self.state, 'BUFFER:', repr(self.buffer)
 
         return response
 
 if __name__ == '__main__':
+    logging.basicConfig(
+        level=logging.DEBUG)
+
     data=[
         '18 00 04 12 62 6f 75 6e 63 65 72 2e 6f 64 64 62 '
         '69 74 2e 63 6f 6d 63 dd 01',
