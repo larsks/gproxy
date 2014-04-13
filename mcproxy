@@ -53,17 +53,25 @@ def parse_args():
     p.add_argument('--debug', '-d',
                    action='store_const',
                    const=logging.DEBUG,
-                   dest='loglevel')
+                   dest='loglevel',
+                   help='Log at DEBUG level')
     p.add_argument('--verbose', '-v',
                    action='store_const',
                    const=logging.INFO,
-                   dest='loglevel')
-    p.add_argument('--config', '-f')
-    p.add_argument('--server-info', '-S', action='append', default=[])
-    p.add_argument('--protocol-version', '-V')
-    p.add_argument('remotehost')
+                   dest='loglevel',
+                   help='Log at INFO level')
+    p.add_argument('--config', '-f',
+                   help='Path to configuration file')
+    p.add_argument('--server-info', '-S', action='append',
+                   default=[],
+                   help='Set server info keys')
+    p.add_argument('--protocol-version', '-V',
+                   help='Set protocol version reported in server info')
+    p.add_argument('remotehost',
+                   help='Name or address of remote host')
     p.add_argument('remoteport',
-                   type=int)
+                   type=int,
+                   help='Remote port')
     p.set_defaults(loglevel=logging.WARN)
     return p.parse_args()
 
