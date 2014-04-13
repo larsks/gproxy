@@ -11,7 +11,7 @@ LOG = logging.getLogger(__name__)
 default_status_response = {'players': {'max': 20, 'online': 0},
                            'version': {'protocol': 4,
                                        'name': 'Minecraft Server'},
-                           'description': 'Minecraft proxy'},
+                           'description': 'Minecraft proxy'}
                 
 
 class Engine (object):
@@ -83,6 +83,7 @@ class Engine (object):
                 if pkt['id'] == Engine.STATUS_REQUEST:
                     LOG.debug('status request')
                     # no payload
+                    LOG.debug('sending response: %s', self.status_response)
                     response.append(
                         Packet.encode({
                             'id': Engine.STATUS_RESPONSE,
