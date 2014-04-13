@@ -7,6 +7,7 @@ import socket
 import time
 import logging
 import yaml
+from jsonpointer import resolve_pointer, set_pointer
 
 import gevent
 from gevent import select
@@ -14,9 +15,20 @@ from gevent import monkey; monkey.patch_all()
 
 from protocol import Engine
 
+LOG = logging.getLogger(__name__)
+
 buffer_size = 8192
 last_data = time.time()
 cfg = {}
+
+# This is the default server information returned to clients as
+# part of the handshake process.  You can override this using
+# jsonpointer expressions in the `server_info` key of the config 
+# file or using the `--server-info` (`-S`) command line option.
+server_info = {'players': {'max': 20, 'online': 0},
+                           'version': {'protocol': 4,
+                                       'name': 'Minecraft Server'},
+                           'description': 'Minecraft proxy'}
 
 class Timeout(Exception):
     pass
@@ -47,6 +59,8 @@ def parse_args():
                    const=logging.INFO,
                    dest='loglevel')
     p.add_argument('--config', '-f')
+    p.add_argument('--server-info', '-S', action='append', default=[])
+    p.add_argument('--protocol-version', '-V')
     p.add_argument('remotehost')
     p.add_argument('remoteport',
                    type=int)
@@ -64,10 +78,10 @@ def connect_to_server():
             s = socket.create_connection(
                 (args.remotehost, args.remoteport),
                 timeout=args.connect_timeout)
-            logging.info('remote is active after %d seconds', wait_time)
+            LOG.info('remote is active after %d seconds', wait_time)
             return s
         except (socket.error, socket.timeout) as detail:
-            logging.debug('waiting %d seconds for remote to become active',
+            LOG.debug('waiting %d seconds for remote to become active',
                          wait_time)
             if args.wait_timeout and wait_time > args.wait_timeout:
                 raise Timeout()
@@ -84,9 +98,9 @@ def proxy_data(clisock, cliaddr, connector):
     rfds = set([clisock])
     wfds = set()
 
-    pe = Engine(cfg.get('server_info'))
+    pe = Engine(server_info)
 
-    logging.info('starting handshake for %s', cliaddr)
+    LOG.info('starting handshake for %s', cliaddr)
 
     # Handle handshake
     while True:
@@ -102,7 +116,7 @@ def proxy_data(clisock, cliaddr, connector):
         if clisock in ready_write:
             nb = clisock.send(from_remote)
             last_data = time.time()
-            logging.debug('wrote %d bytes to client: %s' % (
+            LOG.debug('wrote %d bytes to client: %s' % (
                 nb, repr(from_remote[:nb])))
             from_remote = from_remote[nb:]
             if not from_remote:
@@ -110,7 +124,7 @@ def proxy_data(clisock, cliaddr, connector):
 
         if clisock in ready_read:
             from_client = clisock.recv(buffer_size)
-            logging.debug('read %d bytes from client: %s' % (
+            LOG.debug('read %d bytes from client: %s' % (
                 len(from_client), repr(from_client)))
             if not from_client:
                 # client closed connection
@@ -127,8 +141,8 @@ def proxy_data(clisock, cliaddr, connector):
     rfds = set([clisock])
     wfds = set()
 
-    logging.info('starting main proxy loop for %s', cliaddr)
-    logging.debug('initial client buffer is: %s', repr(from_client))
+    LOG.info('starting main proxy loop for %s', cliaddr)
+    LOG.debug('initial client buffer is: %s', repr(from_client))
 
     while True:
         remsock = connector.value
@@ -149,19 +163,19 @@ def proxy_data(clisock, cliaddr, connector):
 
         if clisock in ready_write:
             nb = clisock.send(from_remote)
-            logging.debug('wrote %d bytes to client', nb)
+            LOG.debug('wrote %d bytes to client', nb)
             from_remote = from_remote[nb:]
             last_data = time.time()
 
         if remsock in ready_write:
             nb = remsock.send(from_client)
-            logging.debug('wrote %d bytes to remote', nb)
+            LOG.debug('wrote %d bytes to remote', nb)
             from_client = from_client[nb:]
             last_data = time.time()
 
         if clisock in ready_read:
             data = clisock.recv(buffer_size)
-            logging.debug('read %d bytes from client', len(data))
+            LOG.debug('read %d bytes from client', len(data))
             if not data:
                 return
             from_client += data
@@ -169,7 +183,7 @@ def proxy_data(clisock, cliaddr, connector):
 
         if remsock in ready_read:
             data = remsock.recv(buffer_size)
-            logging.debug('read %d bytes from remote', len(data))
+            LOG.debug('read %d bytes from remote', len(data))
             if not data:
                 return
             from_remote += data
@@ -180,15 +194,15 @@ def channel(clisock, cliaddr):
     for which we are acting as a proxy.'''
 
     try:
-        logging.debug('starting channel for client %s', cliaddr)
+        LOG.debug('starting channel for client %s', cliaddr)
 
         # Start connecting to remote in another greenlet
         connector = gevent.spawn(connect_to_server)
         proxy_data(clisock, cliaddr, connector)
     except Timeout:
-        logging.debug('timed out waiting for remote to become active')
+        LOG.debug('timed out waiting for remote to become active')
     finally:
-        logging.info('closing channel for client %s', cliaddr)
+        LOG.info('closing channel for client %s', cliaddr)
         clisock.close()
         if connector.value:
             connector.value.close()
@@ -205,25 +219,38 @@ def main():
         with open(args.config) as fd:
             cfg = yaml.load(fd).get('minecraft', {})
 
+    for k,v in cfg.get('server_info', {}).items():
+        set_pointer(server_info, k, v)
+
+    for k in args.server_info:
+        k,v = k.split('=')
+        set_pointer(server_info, k, v)
+
+    if args.protocol_version:
+        set_pointer(server_info, '/version/protocol',
+                    int(args.protocol_version))
+
+    LOG.info('server info: %s', server_info)
+
     listenfds = int(os.environ.get('LISTEN_FDS', 0))
     assert(listenfds == 1)
 
     listener = socket.fromfd(3, socket.AF_INET, socket.SOCK_STREAM)
 
-    logging.info('starting main loop')
+    LOG.info('starting main loop')
     while True:
         rfds, wfds, xfds = select.select([listener], [], [], 10)
         if listener in rfds:
             clisock, cliaddr = listener.accept()
-            logging.info('new connection from %s', cliaddr)
+            LOG.info('new connection from %s', cliaddr)
             gevent.spawn(channel, clisock, cliaddr)
 
         if not rfds:
             now = time.time()
             idletime = now-last_data
-            logging.debug('idle check (%d)', idletime)
+            LOG.debug('idle check (%d)', idletime)
             if args.idle_timeout and (idletime > args.idle_timeout):
-                logging.info('idle time exceeded')
+                LOG.info('idle time exceeded')
                 break
 
 if __name__ == '__main__':

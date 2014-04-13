@@ -8,7 +8,7 @@ from exc import *
 
 LOG = logging.getLogger(__name__)
 
-default_status_response = {'players': {'max': 20, 'online': 0},
+default_server_info = {'players': {'max': 20, 'online': 0},
                            'version': {'protocol': 4,
                                        'name': 'Minecraft Server'},
                            'description': 'Minecraft proxy'}
@@ -48,15 +48,15 @@ class Engine (object):
     PING            = 0x01
     STATUS_RESPONSE = 0
 
-    def __init__(self, status_response=None):
+    def __init__(self, server_info=None):
         self.state = 0
         self.buffer = ''
         self.complete = False
 
-        self.status_response = (
-            status_response
-            if status_response is not None
-            else default_status_response)
+        self.server_info = (
+            server_info
+            if server_info is not None
+            else default_server_info)
 
     def send(self, bytes):
         self.buffer += bytes
@@ -87,12 +87,12 @@ class Engine (object):
                 if pkt['id'] == Engine.STATUS_REQUEST:
                     LOG.debug('status request')
                     # no payload
-                    LOG.debug('sending response: %s', self.status_response)
+                    LOG.debug('sending response: %s', self.server_info)
                     response.append(
                         Packet.encode({
                             'id': Engine.STATUS_RESPONSE,
                             'payload': Status.encode({'status':
-                                                      self.status_response})}))
+                                                      self.server_info})}))
                     self.state = 2
             elif self.state == 2:
                 if pkt['id'] == Engine.PING:
