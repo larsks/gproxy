@@ -87,17 +87,18 @@ class String(Atom):
         value, data = data[:strlen], data[strlen:]
         return value, data
 
-class JSONString(Atom):
+class JSONString(String):
     def __init__(self):
         super(JSONString, self).__init__()
         self.varint = Varint()
 
     def encode(self, value):
         data = json.dumps(value)
-        return data
+        return super(JSONString, self).encode(data)
 
     def decode(self, data):
-        return json.loads(data), ''
+        value, data = super(JSONString, self).decode(data)
+        return json.loads(value), data
 
 class Bytes (Atom):
     def __init__(self, length):
