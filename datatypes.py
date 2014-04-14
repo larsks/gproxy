@@ -7,6 +7,12 @@ from exc import *
 
 LOG = logging.getLogger(__name__)
 
+# Packet IDs.  Geez, Mojang, how about some variety?
+HANDSHAKE       = 0
+STATUS_REQUEST  = 0
+PING            = 0x01
+STATUS_RESPONSE = 0
+
 class Atom(object):
     def decode(self, data):
         return data
